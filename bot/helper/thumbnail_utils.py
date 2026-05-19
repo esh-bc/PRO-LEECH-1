@@ -2,8 +2,15 @@
 
 import re
 import os
+import warnings
 from os import path as ospath
 
+# PTN v2.8.2 has invalid regex escape sequences in its internal files (extras.py,
+# patterns.py, post.py) that trigger SyntaxWarnings on Python 3.13+. These are
+# harmless — the patterns still match correctly. Suppress to keep logs clean.
+with warnings.catch_warnings():
+    warnings.filterwarnings('ignore', category=SyntaxWarning, module='PTN')
+    import PTN
 from aiohttp import ClientSession
 from lxml.etree import HTML
 
@@ -26,57 +33,34 @@ class ThumbnailFetcher:
 
     @staticmethod
     def parse_filename(filename: str) -> dict:
-        name = ospath.splitext(filename)[0]
+        base_name = ospath.splitext(os.path.basename(filename))[0]
+        ptn_result = PTN.parse(base_name)
 
-        year_match = re.search(r'\b(19|20)\d{2}\b', name)
-        year = year_match.group() if year_match else None
+        title = ptn_result.get('title', '').strip()
+        year = ptn_result.get('year')  # returned as int by PTN
+        season = ptn_result.get('season')
+        episode = ptn_result.get('episode')
+        episode_name = ptn_result.get('episodeName')
 
-        is_tv = False
-        season = None
-        tv_pattern = re.search(r'(.+?)\s*[sS](\d{1,2})\s*[eE](\d{1,3})', name)
-        if tv_pattern:
-            is_tv = True
-            name = tv_pattern.group(1).strip()
-            season = int(tv_pattern.group(2))
-        else:
-            alt_tv_pattern = re.search(r'(.+?)\s*(?:[eE]pisode\s*\d+|[eE]\d+[.\s]*[sS](\d+))', name)
-            if alt_tv_pattern:
-                is_tv = True
-                name = alt_tv_pattern.group(1).strip()
-                if alt_tv_pattern.group(2):
-                    season = int(alt_tv_pattern.group(2))
+        is_tv = season is not None or episode is not None or bool(episode_name)
 
-        if year:
-            name = name.replace(year, ' ').strip()
+        # Fallback: if PTN couldn't extract a meaningful title, do basic cleaning
+        if not title or len(title) < 2:
+            name = base_name
+            year_match = re.search(r'\b(19|20)\d{2}\b', name)
+            yr = str(year_match.group()) if year_match else None
+            if yr:
+                name = name.replace(yr, ' ').strip()
+            name = re.sub(r'[._]', ' ', name)
+            name = re.sub(r'\s+', ' ', name).strip()
+            return {'name': name, 'year': yr, 'is_tv': False, 'season': None}
 
-        name = re.sub(r'\s*[-–]\s*[A-Za-z0-9]+\s*$', '', name)
-
-        patterns_to_remove = [
-            r'\[.*?\]',
-            r'\([^)]*\)',
-            r'\{.*?\}',
-            r'\b(?:2160p|1080p|720p|480p|360p|240p|4K|UHD)\b',
-            r'\b(?:HDR10\+?|HDR|DV|DoVi|Dolby\s*Vision|SDR)\b',
-            r'\b(?:x265|x264|h\.?264|h\.?265|HEVC|AVC|AV1|VP9)\b',
-            r'\b(?:BluRay|Blu-Ray|WEBRip|WEB-DL|WEBDL|WEB|DVDRip|BRRip|BDRip|HDRip|HDTV|PDTV|CamRip|BMS|AMZN|NF|DSNP|HMAX|REMUX)\b',
-            r'\b(?:DDP5\.?1|DD5\.?1|DDP7\.?1|DD7\.?1|AAC5\.?1|AAC2\.?0|AAC|DTS|DTS-HD|TrueHD|Atmos|EAC3|AC3|FLAC|MA)\b',
-            r'\b(?:DSQHD|DS4K|DS2K|DSNHD|IMAX|Extended|Remastered|Unrated|Directors\s*Cut|DC|PROPER|REPACK)\b',
-            r'\b(?:10bit|10-bit|8bit|8-bit|Hi10P)\b',
-            r'\b(?:Dual[Aa]udio|Multi|Hindi|English|Tamil|Telugu|Malayalam|Kannada|Korean|Japanese|Chinese|Spanish|French|German|Italian|Portuguese|Russian|Indonesian)\b',
-            r'\b(?:YIFY|YTS|RARBG|SPARKS|GECKOS|FGT|EVO|ETRG|ETTV|LOL|KILLERS|DIMENSION|FLEET|AVS|CMRG|NTb|CtrlHD|QxR|EDITH|Pahe|PSA|MeGUiL|AMRAP|Chiheisen|Toonworld4all|CR)\b',
-            r'\b(?:ESub|ESubs|Subs|Subtitles)\b',
-            r'\d+(?:\.\d+)?\s*(?:MB|GB|TB)\b',
-        ]
-
-        for pattern in patterns_to_remove:
-            name = re.sub(pattern, ' ', name, flags=re.IGNORECASE)
-
-        name = re.sub(r'[._]', ' ', name)
-
-        name = re.sub(r'\s+', ' ', name).strip()
-        name = re.sub(r'^[-–\s]+|[-–\s]+$', '', name).strip()
-
-        return {'name': name, 'year': year, 'is_tv': is_tv, 'season': season}
+        return {
+            'name': title,
+            'year': str(year) if year else None,
+            'is_tv': is_tv,
+            'season': season,
+        }
 
     @staticmethod
     async def search_tmdb(query: str, year: str = None, is_tv: bool = False, season: int = None) -> str or None:
@@ -92,73 +76,139 @@ class ThumbnailFetcher:
 
             async with ClientSession() as session:
                 for search_type in search_types:
-                    search_url = f"{ThumbnailFetcher.TMDB_BASE_URL}/search/{search_type}?query={quote(query)}"
+                    for try_year in ([year, None] if year else [None]):
+                        if try_year is None and year is not None:
+                            search_query = re.sub(
+                                r'\b' + re.escape(str(year)) + r'\b', '',
+                                query
+                            ).strip()
+                        else:
+                            search_query = query
 
-                    if year and search_type == 'movie':
-                        search_url += f"&year={year}"
-                    elif year and search_type == 'tv':
-                        search_url += f"&first_air_date_year={year}"
+                        search_url = f"{ThumbnailFetcher.TMDB_BASE_URL}/search/{search_type}?query={quote(search_query)}"
 
-                    LOGGER.debug(f"TMDB search URL: {search_url}")
+                        if try_year and search_type == 'movie':
+                            search_url += f"&year={try_year}"
+                        elif try_year and search_type == 'tv':
+                            search_url += f"&first_air_date_year={try_year}"
 
-                    async with session.get(search_url, headers=headers, ssl=False, timeout=10) as resp:
-                        if resp.status != 200:
-                            continue
-                        html_content = await resp.text()
+                        LOGGER.debug(f"TMDB search URL: {search_url}")
 
-                    html = HTML(html_content)
+                        async with session.get(search_url, headers=headers, ssl=False, timeout=10) as resp:
+                            if resp.status != 200:
+                                continue
+                            html_content = await resp.text()
 
-                    if search_type == 'tv' and season:
-                        show_links = html.xpath('//a[contains(@href, "/tv/")]/@href')
-                        if show_links:
-                            show_path = show_links[0]
-                            season_url = f"{ThumbnailFetcher.TMDB_BASE_URL}{show_path}/season/{season}"
-                            LOGGER.info(f"TMDB fetching season {season} poster from: {season_url}")
-                            
-                            async with session.get(season_url, headers=headers, ssl=False, timeout=10) as season_resp:
-                                if season_resp.status == 200:
-                                    season_html_content = await season_resp.text()
-                                    season_html = HTML(season_html_content)
+                        html = HTML(html_content)
 
-                                    season_posters = season_html.xpath('//div[contains(@class, "poster")]//img/@src')
-                                    if not season_posters:
-                                        season_posters = season_html.xpath('//img[contains(@src, "/t/p/")]/@src')
-                                    
-                                    if season_posters:
-                                        poster_path = season_posters[0]
-                                        poster_match = re.search(r'/t/p/[^/]+/(.+)', poster_path)
-                                        if poster_match:
-                                            poster_filename = poster_match.group(1)
-                                            full_url = f"{ThumbnailFetcher.TMDB_IMAGE_BASE}/{poster_filename}"
-                                            LOGGER.info(f"TMDB season {season} poster URL: {full_url}")
-                                            return full_url
+                        if search_type == 'tv' and season:
+                            show_links = [
+                                l for l in html.xpath('//a[contains(@href, "/tv/")]/@href')
+                                if re.search(r'/tv/\d+', l)
+                            ]
+                            if show_links:
+                                show_path = show_links[0]
 
-                    posters = html.xpath('//div[contains(@class, "poster")]//img/@src')
-                    if not posters:
-                        posters = html.xpath('//a[@data-id]/img/@src')
-                    if not posters:
-                        posters = html.xpath('//img[contains(@src, "/t/p/")]/@src')
+                                backdrop_url = await ThumbnailFetcher._try_fetch_backdrop(
+                                    session, show_path, headers
+                                )
+                                if backdrop_url:
+                                    return backdrop_url
 
-                    if posters:
-                        poster_path = posters[0]
-                        LOGGER.debug(f"TMDB found poster path: {poster_path}")
+                                season_url = f"{ThumbnailFetcher.TMDB_BASE_URL}{show_path}/season/{season}"
+                                LOGGER.info(f"TMDB fetching season {season} poster from: {season_url}")
 
-                        poster_match = re.search(r'/t/p/[^/]+/(.+)', poster_path)
-                        if poster_match:
-                            poster_filename = poster_match.group(1)
-                            full_url = f"{ThumbnailFetcher.TMDB_IMAGE_BASE}/{poster_filename}"
-                            LOGGER.info(f"TMDB poster URL (original quality): {full_url}")
-                            return full_url
+                                async with session.get(season_url, headers=headers, ssl=False, timeout=10) as season_resp:
+                                    if season_resp.status == 200:
+                                        season_html_content = await season_resp.text()
+                                        season_html = HTML(season_html_content)
 
-                        if poster_path.startswith('http'):
-                            upgraded = re.sub(r'/t/p/[^/]+/', '/t/p/original/', poster_path)
-                            LOGGER.info(f"TMDB poster URL (upgraded): {upgraded}")
-                            return upgraded
+                                        season_posters = season_html.xpath('//div[contains(@class, "poster")]//img/@src')
+                                        if not season_posters:
+                                            season_posters = season_html.xpath('//img[contains(@src, "/t/p/")]/@src')
+
+                                        if season_posters:
+                                            poster_path = season_posters[0]
+                                            poster_match = re.search(r'/t/p/[^/]+/(.+)', poster_path)
+                                            if poster_match:
+                                                poster_filename = poster_match.group(1)
+                                                full_url = f"{ThumbnailFetcher.TMDB_IMAGE_BASE}/{poster_filename}"
+                                                LOGGER.info(f"TMDB season {season} poster URL: {full_url}")
+                                                return full_url
+
+                        posters = html.xpath('//div[contains(@class, "poster")]//img/@src')
+                        if not posters:
+                            posters = html.xpath('//a[@data-id]/img/@src')
+                        if not posters:
+                            posters = html.xpath('//img[contains(@src, "/t/p/")]/@src')
+
+                        if posters:
+                            detail_links = [
+                                l for l in html.xpath(
+                                    f'//a[contains(@href, "/{search_type}/")]/@href'
+                                )
+                                if re.search(rf'/{search_type}/\d+', l)
+                            ]
+                            if detail_links:
+                                backdrop_url = await ThumbnailFetcher._try_fetch_backdrop(
+                                    session, detail_links[0], headers
+                                )
+                                if backdrop_url:
+                                    return backdrop_url
+
+                            poster_path = posters[0]
+                            LOGGER.debug(f"TMDB found poster path: {poster_path}")
+
+                            poster_match = re.search(r'/t/p/[^/]+/(.+)', poster_path)
+                            if poster_match:
+                                poster_filename = poster_match.group(1)
+                                full_url = f"{ThumbnailFetcher.TMDB_IMAGE_BASE}/{poster_filename}"
+                                LOGGER.info(f"TMDB poster URL (original quality): {full_url}")
+                                return full_url
+
+                            if poster_path.startswith('http'):
+                                upgraded = re.sub(r'/t/p/[^/]+/', '/t/p/original/', poster_path)
+                                LOGGER.info(f"TMDB poster URL (upgraded): {upgraded}")
+                                return upgraded
+
+                        if try_year is not None:
+                            LOGGER.info(f"TMDB: No poster with year={try_year}, retrying without year filter (query: '{search_query}')")
 
             return None
 
         except Exception as e:
             LOGGER.error(f"TMDB search error: {e}")
+            return None
+
+    @staticmethod
+    async def _try_fetch_backdrop(session: ClientSession, detail_path: str, headers: dict) -> str or None:
+        """Fetch a landscape backdrop from a TMDB movie/TV detail page."""
+        try:
+            backdrop_url = f"{ThumbnailFetcher.TMDB_BASE_URL}{detail_path}/images/backdrops"
+            LOGGER.info(f"TMDB fetching backdrop from: {backdrop_url}")
+
+            async with session.get(backdrop_url, headers=headers, ssl=False, timeout=10) as resp:
+                if resp.status != 200:
+                    LOGGER.debug(f"TMDB backdrop page returned {resp.status}")
+                    return None
+                html_content = await resp.text()
+
+            html = HTML(html_content)
+
+            backdrop_links = html.xpath(
+                '//img[contains(@src, "w500_and_h282_face")]/ancestor::a[1]/@href'
+            )
+            if not backdrop_links:
+                LOGGER.debug("TMDB no backdrop images found on gallery page")
+                return None
+
+            backdrop_path = backdrop_links[0]
+            LOGGER.debug(f"TMDB found backdrop link: {backdrop_path}")
+            LOGGER.info(f"TMDB backdrop URL: {backdrop_path}")
+            return backdrop_path
+
+        except Exception as e:
+            LOGGER.error(f"TMDB backdrop fetch error: {e}")
             return None
 
     @staticmethod
