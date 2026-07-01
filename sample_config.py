@@ -40,7 +40,7 @@ SAFE_MODE = False
 STRICT_AUTH_MODE = False
 STRICT_FILE_MODE = False
 MEDIA_STORE = True
-DELETE_LINKS = False
+DELETE_LINKS = True
 CLEAN_LOG_MSG = False
 
 # Disable feature surfaces
@@ -116,8 +116,8 @@ AUTHOR_URL = "https://t.me/iam_esh"
 HELPER_TOKENS = ""
 
 # Mega
-MEGA_EMAIL = ""
-MEGA_PASSWORD = ""
+MEGA_EMAIL = "singhyashraj432singhyashraj3@gmail.com"
+MEGA_PASSWORD = "1234567890@yash"
 MEGA_ENABLED = True
 
 # JDownloader
