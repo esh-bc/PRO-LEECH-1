@@ -95,9 +95,9 @@ CAP_FONT = "code"  # code | bold | italic
 LEECH_CAPTION = ""
 THUMBNAIL_LAYOUT = ""  # e.g. "3x4"
 SAVE_MSG = False
-SOURCE_LINK = False
-SCREENSHOTS_MODE = False
-SHOW_MEDIAINFO = False
+SOURCE_LINK = True
+SCREENSHOTS_MODE = True
+SHOW_MEDIAINFO = True
 
 # Custom command tables
 FFMPEG_CMDS = {}
