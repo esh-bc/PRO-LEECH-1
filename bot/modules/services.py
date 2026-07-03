@@ -37,7 +37,6 @@ async def start(_, message):
     userid = user.id
     buttons = ButtonMaker()
     buttons.url_button(BotTheme("ST_BN1_NAME"), BotTheme("ST_BN1_URL"))
-    buttons.url_button(BotTheme("ST_BN2_NAME"), BotTheme("ST_BN2_URL"))
     reply_markup = buttons.build_menu(2)
 
     if len(message.command) > 1 and message.command[1] == "neowzml":
