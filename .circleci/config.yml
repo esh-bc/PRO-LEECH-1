@@ -54,4 +54,24 @@ workflows:
     when:
       equal: [ true, << pipeline.parameters.run-schedule >> ]
     jobs:
+      - run-bot      - run:
+          name: Keep Alive & Run NEO-WZML Bot
+          no_output_timeout: 55m
+          command: |
+            (while true; do echo "[KEEP-ALIVE] $(date)"; sleep 240; done) &
+            docker run --rm \
+              -e PYTHONUNBUFFERED=1 \
+              neo-wzml 2>&1 | tee bot.log
+
+workflows:
+  on-push:
+    when:
+      equal: [ false, << pipeline.parameters.run-schedule >> ]
+    jobs:
+      - run-bot
+
+  keep-alive:
+    when:
+      equal: [ true, << pipeline.parameters.run-schedule >> ]
+    jobs:
       - run-bot
