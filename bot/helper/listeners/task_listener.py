@@ -980,7 +980,7 @@ msg = f"""<i><b>Upload Stopped!</b></i>
 • <b>Due To:</b> {escape(friendly_error)}
 • <b>Mode:</b> {self.mode[0]} - {self.mode[1]}
 • <b>Elapsed:</b> {get_readable_time(time() - self.message.date.timestamp())}"""
-        await send_message(self.message, msg, photo=task_failed_photo)
+    await send_message(self.message, msg, photo=task_failed_photo)
     if count == 0:
         await self.clean()
     else:
