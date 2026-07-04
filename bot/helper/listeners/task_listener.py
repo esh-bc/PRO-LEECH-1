@@ -830,7 +830,7 @@ class TaskListener(TaskConfig):
 • <b>Elapsed:</b> {get_readable_time(time() - self.message.date.timestamp())}"""
         )
 
-        await send_message(self.message, msg, button)
+        await send_message(self.message, msg, button, photo=task_failed_photo)
         await self._send_mega_skipped_breakdown()
 
         if count == 0:
