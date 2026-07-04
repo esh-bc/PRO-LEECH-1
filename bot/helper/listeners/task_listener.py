@@ -963,24 +963,26 @@ class TaskListener(TaskConfig):
         return error
 
     async def on_upload_error(self, error):
-        task_failed_photo = choice(glob("bot/images/task_failed/*"))
-        async with task_dict_lock:
-            if self.mid in task_dict:
-                del task_dict[self.mid]
-            count = len(task_dict)
-        await database.remove_shared_task(
-            self.mid, TgClient.ID, user_id=self.user_id
-        )
-        
-        friendly_error = self._beautify_error(str(error))
+    task_failed_photo = choice(glob("bot/images/task_failed/*"))
+    async with task_dict_lock:
+        if self.mid in task_dict:
+            del task_dict[self.mid]
+        count = len(task_dict)
+    await database.remove_shared_task(
+        self.mid, TgClient.ID, user_id=self.user_id
+    )
 
-msg = f"""<i><b>Upload Stopped!</b></i>
-• <b>Task for:</b> {self.tag}
+    friendly_error = self._beautify_error(str(error))
 
-• <b>Due To:</b> {escape(friendly_error)}
-• <b>Mode:</b> {self.mode[0]} - {self.mode[1]}
-• <b>Elapsed:</b> {get_readable_time(time() - self.message.date.timestamp())}"""
-     await send_message(self.message, msg, photo=task_failed_photo)
+    msg = f"""<i><b>Upload Stopped!</b></i>
+ • <b>Task for:</b> {self.tag}
+
+ • <b>Due To:</b> {escape(friendly_error)}
+ • <b>Mode:</b> {self.mode[0]} - {self.mode[1]}
+ • <b>Elapsed:</b> {get_readable_time(time() - self.message.date.timestamp())}"""
+
+    await send_message(self.message, msg, photo=task_failed_photo)
+
     if count == 0:
         await self.clean()
     else:
@@ -992,22 +994,22 @@ msg = f"""<i><b>Upload Stopped!</b></i>
         ):
             await database.rm_complete_task(self.message.link)
 
-        async with queue_dict_lock:
-            if self.mid in queued_dl:
-                queued_dl[self.mid].set()
-                del queued_dl[self.mid]
-            if self.mid in queued_up:
-                queued_up[self.mid].set()
-                del queued_up[self.mid]
-            if self.mid in non_queued_dl:
-                non_queued_dl.remove(self.mid)
-            if self.mid in non_queued_up:
-                non_queued_up.remove(self.mid)
+    async with queue_dict_lock:
+        if self.mid in queued_dl:
+            queued_dl[self.mid].set()
+            del queued_dl[self.mid]
+        if self.mid in queued_up:
+            queued_up[self.mid].set()
+            del queued_up[self.mid]
+        if self.mid in non_queued_dl:
+            non_queued_dl.remove(self.mid)
+        if self.mid in non_queued_up:
+            non_queued_up.remove(self.mid)
 
-        await start_from_queued()
-        await sleep(3)
-        await clean_download(self.dir)
-        if self.up_dir:
-            await clean_download(self.up_dir)
-        if self.thumb and await aiopath.exists(self.thumb):
-            await remove(self.thumb)
+    await start_from_queued()
+    await sleep(3)
+    await clean_download(self.dir)
+    if self.up_dir:
+        await clean_download(self.up_dir)
+    if self.thumb and await aiopath.exists(self.thumb):
+        await remove(self.thumb)
