@@ -1,0 +1,16 @@
+name: Check Python Syntax
+
+on:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  syntax-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check all Python files compile without errors
+        run: python -m compileall -q bot/
